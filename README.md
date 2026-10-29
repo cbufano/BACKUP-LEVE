@@ -3,7 +3,7 @@
 Backup de pastas para um disco externo, leve e seguro.
 Você escolhe as pastas, o programa copia, lembra o que copiou e avisa quando algo no disco de backup mudou.
 
-> **Estado:** em desenvolvimento (pré-alfa). Ainda não use em dados importantes.
+> **Estado:** em desenvolvimento (pré-alfa). O motor funciona pela linha de comando. A janela ainda não existe. Ainda não use em dados importantes.
 
 *English summary: lightweight, on-demand folder backup to an external drive. It keeps an index of every copied file, never overwrites silently, and asks the user to resolve files changed on the backup drive. Built with Rust + Tauri. Docs are in Portuguese for now.*
 
@@ -62,9 +62,31 @@ Requisitos:
 Passos:
 
 1. Clone o repositório.
-2. Rode os testes do motor: `cargo test --workspace`.
+2. Rode os testes: `cargo test --workspace`.
+3. Compile o programa: `cargo build --release`.
 
-A interface ainda não existe. Veja [app/README.md](app/README.md).
+O programa fica em `target/release/backup-leve.exe`. A interface ainda não existe. Veja [app/README.md](app/README.md).
+
+## Usar pela linha de comando
+
+```
+backup-leve sincronizar --origem "D:\Documentos" --destino "E:\Backup\Documentos"
+```
+
+| Opção | Efeito |
+|---|---|
+| `--modo sincronizar` | Copia arquivos novos e atualiza os alterados na origem. É o padrão. |
+| `--modo somente-novos` | Copia só arquivos novos. Os alterados na origem aparecem no relatório. |
+| `--simulacao` | Mostra o que seria feito. Não copia nada e não cria nada no destino. |
+
+No fim, o programa mostra um resumo e grava o relatório em `<destino>\.backup-leve\relatorios\`.
+
+| Código de saída | Sentido |
+|---|---|
+| 0 | Tudo certo. |
+| 1 | A execução parou antes de copiar (por exemplo, disco de destino desconectado). |
+| 3 | Há conflitos para decidir. |
+| 4 | Alguns arquivos não foram copiados. A próxima execução tenta de novo. |
 
 ## Documentação
 

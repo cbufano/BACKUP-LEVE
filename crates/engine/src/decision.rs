@@ -2,11 +2,13 @@
 //!
 //! Pure logic, no I/O. Implements the tables in `docs/REGRAS-DE-SINCRONISMO.md`.
 
+use serde::Serialize;
+
 /// FAT32 stores modification times with 2-second precision.
 pub const MTIME_TOLERANCE_MS: i64 = 2_000;
 
 /// Size and modification time of a file at one moment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Snapshot {
     pub size: u64,
     /// Milliseconds since the Unix epoch.
@@ -31,7 +33,8 @@ pub struct IndexEntry {
     pub destination: Snapshot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Mode {
     /// Copy new files only. Files changed in the source are reported, not copied.
     AddOnly,
@@ -39,7 +42,8 @@ pub enum Mode {
     Sync,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ConflictKind {
     /// Both sides have the file, the index does not, and they differ.
     ExistsWithDifferentContent,

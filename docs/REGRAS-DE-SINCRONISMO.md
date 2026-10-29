@@ -84,8 +84,8 @@ No fim, a tela de conflitos mostra a lista. Para cada arquivo, o usuário escolh
 | Manter os dois | No destino ficam as duas versões. Cada nome recebe a data de modificação: `relatorio (origem 2026-10-28 14-30).docx` e `relatorio (destino 2026-10-29 09-12).docx`. A origem não muda. |
 | Decidir depois | Nada muda. O conflito aparece de novo na próxima execução. |
 
-Na execução agendada (sem janela), os conflitos ficam salvos.
-Na próxima vez que o usuário abrir o programa, a tela de conflitos aparece.
+O programa não precisa gravar os conflitos. A cada execução, ele compara de novo o estado atual com o índice, e o conflito aparece outra vez.
+Por isso, depois de uma execução agendada (sem janela), a tela de conflitos aparece na próxima vez que o usuário abrir o programa.
 
 Para o conflito "apagado no destino", as opções são:
 
@@ -102,6 +102,19 @@ Para o conflito "apagado no destino", as opções são:
 
 Se a energia cai no meio, o arquivo final não fica corrompido.
 Na próxima execução, o programa apaga os arquivos `.backup-leve-parcial` e continua de onde parou.
+
+## Quando a execução para
+
+O programa para antes de copiar qualquer arquivo nestes casos:
+
+| Situação | Motivo |
+|---|---|
+| A pasta de origem não existe. | Sem origem, não há o que copiar. |
+| O disco de destino não está conectado. | O programa não cria pastas em outro disco por engano. |
+| A origem e o destino ficam um dentro do outro. | O backup copiaria a si mesmo sem fim. |
+| O destino já recebe o backup de outra origem. | Dois backups no mesmo índice se misturam. |
+
+Um erro em um só arquivo não para a execução. O arquivo vai para a lista de erros, e a próxima execução tenta de novo.
 
 ## Pontos abertos
 

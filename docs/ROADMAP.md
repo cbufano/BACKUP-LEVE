@@ -7,14 +7,17 @@
 - [x] Estrutura do repositório para o GitHub
 - [x] Tabela de decisão em código, com testes
 
-## Fase 1 — Motor pela linha de comando
+## Fase 1 — Motor pela linha de comando (feita)
 
-- [ ] Varredura com filtros de exclusão (`Thumbs.db`, `desktop.ini`, `$RECYCLE.BIN`, `System Volume Information`)
-- [ ] Índice SQLite
-- [ ] Cópia segura com retomada
-- [ ] Relatório JSON e HTML
-- [ ] Comando `backup-leve sincronizar --origem <pasta> --destino <pasta>`
-- [ ] Testes com pastas temporárias reais
+- [x] Varredura com filtros de exclusão (`Thumbs.db`, `desktop.ini`, `$RECYCLE.BIN`, `System Volume Information`)
+- [x] Índice SQLite
+- [x] Cópia segura com retomada
+- [x] Relatório JSON e HTML
+- [x] Comando `backup-leve sincronizar --origem <pasta> --destino <pasta>`
+- [x] Testes com pastas temporárias reais
+
+Resultado medido em 29/10/2026: primeira carga de 2003 arquivos (50 MB) em 2 s; segunda execução em 0,1 s.
+O programa compilado tem 2,6 MB.
 
 ## Fase 2 — Interface
 
