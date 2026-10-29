@@ -1,0 +1,31 @@
+# Rust
+/target/
+**/target/
+
+# Node / interface
+node_modules/
+app/dist/
+app/src-tauri/gen/
+
+# Claude Code (configuração pessoal)
+.claude/settings.local.json
+
+# Arquivos temporários de trabalho
+/temp/
+
+# Atalhos pessoais (caminhos da máquina do dono)
+/ABRIR_*.bat
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Editores
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Dados de teste do próprio programa
+.backup-leve/
+*.backup-leve-parcial

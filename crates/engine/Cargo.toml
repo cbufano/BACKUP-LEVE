@@ -1,0 +1,9 @@
+[package]
+name = "backup-leve-engine"
+description = "Backup Leve sync engine: scan, decide, copy, index, report."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
