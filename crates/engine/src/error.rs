@@ -20,6 +20,9 @@ pub enum Error {
     #[error("o índice foi criado por uma versão mais nova do Backup Leve (esquema {0})")]
     UnsupportedIndexVersion(i64),
 
+    #[error("perfis: {0}")]
+    Profile(String),
+
     #[error("erro de disco: {0}")]
     Io(#[from] std::io::Error),
 

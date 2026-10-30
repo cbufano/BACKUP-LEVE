@@ -36,6 +36,14 @@ pub struct ConflictItem {
     pub destination: Option<Snapshot>,
 }
 
+/// A folder left out of the backup by a rule.
+#[derive(Debug, Clone, Serialize)]
+pub struct LeftOutItem {
+    pub path: String,
+    /// Who creates the folder again.
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ErrorItem {
     pub path: String,
@@ -60,6 +68,8 @@ pub struct Report {
     pub destination: String,
     pub mode: Mode,
     pub dry_run: bool,
+    /// The user stopped the run before the end.
+    pub cancelled: bool,
     pub copied: Vec<FileItem>,
     pub updated: Vec<FileItem>,
     /// Already equal on both sides: recorded in the index without copying.
@@ -68,6 +78,10 @@ pub struct Report {
     pub removed_from_source: Vec<FileItem>,
     pub conflicts: Vec<ConflictItem>,
     pub errors: Vec<ErrorItem>,
+    /// Folders that a tool creates again, not copied.
+    pub left_out: Vec<LeftOutItem>,
+    /// Index records removed because their file now stays out.
+    pub left_out_forgotten: u64,
     pub unchanged: u64,
     pub forgotten: u64,
     pub partials_removed: u64,
@@ -93,6 +107,7 @@ impl Report {
             destination: display_absolute(destination),
             mode,
             dry_run,
+            cancelled: false,
             copied: Vec::new(),
             updated: Vec::new(),
             adopted: Vec::new(),
@@ -100,6 +115,8 @@ impl Report {
             removed_from_source: Vec::new(),
             conflicts: Vec::new(),
             errors: Vec::new(),
+            left_out: Vec::new(),
+            left_out_forgotten: 0,
             unchanged: 0,
             forgotten: 0,
             partials_removed: 0,
@@ -139,10 +156,10 @@ impl Report {
             escape(&self.destination),
             escape(&format_rfc3339(&self.started_at)),
             mode_label(self.mode),
-            if self.dry_run {
-                " · simulação, nada foi alterado"
-            } else {
-                ""
+            match (self.dry_run, self.cancelled) {
+                (true, _) => " · simulação, nada foi alterado",
+                (false, true) => " · interrompido pelo usuário",
+                (false, false) => "",
             },
         );
 
@@ -169,6 +186,11 @@ impl Report {
             (
                 "Removidos na origem",
                 self.removed_from_source.len().to_string(),
+                false,
+            ),
+            (
+                "Pastas deixadas de fora",
+                self.left_out.len().to_string(),
                 false,
             ),
             (
@@ -250,6 +272,24 @@ impl Report {
             &self.updated,
         );
         file_section(&mut html, "Copiados", "", &self.copied);
+        if !self.left_out.is_empty() {
+            html.push_str(
+                "<section><h2>Pastas deixadas de fora</h2><p class=\"note\">Um programa cria estas \
+                 pastas de novo. Elas não foram copiadas.</p>\
+                 <table><thead><tr><th>Pasta</th><th>Quem cria de novo</th></tr></thead><tbody>\n",
+            );
+            for item in self.left_out.iter().take(HTML_ROW_LIMIT) {
+                let _ = writeln!(
+                    html,
+                    "<tr><td>{}</td><td>{}</td></tr>",
+                    escape(&item.path),
+                    escape(&item.reason)
+                );
+            }
+            html.push_str("</tbody></table>");
+            limit_note(&mut html, self.left_out.len());
+            html.push_str("</section>\n");
+        }
         file_section(
             &mut html,
             "Registrados sem cópia",

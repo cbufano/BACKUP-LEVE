@@ -1,34 +1,67 @@
 //! One run: scan both sides, decide each file, copy, update the index, write the report.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use chrono::{Local, Utc};
 
-use crate::copy::copy_file;
+use crate::copy::copy_file_with_progress;
 use crate::decision::{decide, Action, IndexEntry, Mode, Snapshot};
 use crate::error::{Error, Result};
+use crate::exclude::Exclusions;
 use crate::index::{Index, META_SOURCE};
 use crate::paths::{self, REPLACED_DIR, REPORTS_DIR, STATE_DIR};
-use crate::report::{ConflictItem, ErrorItem, FileItem, Report};
-use crate::scan::{scan, ScanResult};
+use crate::report::{ConflictItem, ErrorItem, FileItem, LeftOutItem, Report};
+use crate::scan::{scan_with_progress, Filter, ScanResult};
 
-#[derive(Debug, Clone, Copy)]
+/// Longest time a copied file waits to enter the index.
+const COMMIT_INTERVAL: Duration = Duration::from_secs(1);
+
+#[derive(Debug, Clone, Default)]
 pub struct Options {
     pub mode: Mode,
     /// Decide and report, but write nothing.
     pub dry_run: bool,
+    /// When set to `true`, the run stops after the current file and saves the report.
+    pub cancel: Option<Arc<AtomicBool>>,
+    /// What stays out of the backup. The default leaves out nothing.
+    pub exclusions: Exclusions,
+}
+
+/// Folder being read before the copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Source,
+    Destination,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum Event<'a> {
-    Scanning,
+    /// The scan of one side starts. The source comes first.
+    Scanning {
+        side: Side,
+        /// Files the index expects on this side. Zero when unknown.
+        expected: u64,
+    },
+    /// One more file was found on `side`.
+    ScanProgress {
+        side: Side,
+        found: u64,
+        path: &'a str,
+    },
     Planned {
         files: u64,
         bytes: u64,
+        /// Files already in the backup and unchanged: not copied again.
+        already: u64,
     },
+    /// Part of a large file was copied. `done_bytes` counts that part too.
+    FileProgress { path: &'a str, done_bytes: u64 },
     FileDone {
         path: &'a str,
         done_files: u64,
@@ -62,14 +95,7 @@ pub fn run(
     if !source.is_dir() {
         return Err(Error::SourceNotFound(source.to_path_buf()));
     }
-    let source_id = comparable(source)?;
-    let destination_id = comparable(destination)?;
-    if source_id.starts_with(&destination_id) || destination_id.starts_with(&source_id) {
-        return Err(Error::NestedFolders(
-            source.to_path_buf(),
-            destination.to_path_buf(),
-        ));
-    }
+    let source_id = check_not_nested(source, destination)?;
     prepare_destination(destination, options.dry_run)?;
 
     let index = if options.dry_run {
@@ -77,16 +103,8 @@ pub fn run(
     } else {
         Some(Index::open(destination)?)
     };
-    let source_id = source_id.to_string_lossy().into_owned();
     if let Some(index) = &index {
-        match index.meta(META_SOURCE)? {
-            Some(stored) if stored != source_id => {
-                return Err(Error::IndexBelongsToOtherSource(stored))
-            }
-            Some(_) => {}
-            None if !options.dry_run => index.set_meta(META_SOURCE, &source_id)?,
-            None => {}
-        }
+        check_index_source(index, &source_id, !options.dry_run)?;
     }
     let writable = if options.dry_run {
         None
@@ -96,16 +114,95 @@ pub fn run(
 
     let mut report = Report::new(source, destination, options.mode, options.dry_run, started);
 
-    on_event(Event::Scanning);
-    let source_scan = scan(source);
-    let destination_scan = if destination.is_dir() {
-        scan(destination)
+    let exclusions = &options.exclusions;
+    let mut scan_side = |side: Side, root: &Path, filter: Filter<'_>, expected: u64| {
+        on_event(Event::Scanning { side, expected });
+        scan_with_progress(root, filter, &mut |found, path| {
+            on_event(Event::ScanProgress { side, found, path });
+            !is_cancelled(options)
+        })
+    };
+    let source_filter = Filter {
+        exclusions,
+        folders: None,
+    };
+    let mut source_scan = scan_side(Side::Source, source, source_filter, 0);
+
+    // The source decides which folders stay out. The destination does not read them,
+    // and their records leave the index: the copies already in the destination stay
+    // there, outside the program.
+    let mut left_out_folders: HashSet<String> = source_scan
+        .left_out
+        .iter()
+        .map(|folder| paths::fold_key(&folder.path))
+        .collect();
+    let mut stored = match &index {
+        Some(index) if !source_scan.stopped => index.load_all()?,
+        _ => Default::default(),
+    };
+    let mut forget_left_out = Vec::new();
+    if !exclusions.is_empty() {
+        stored.retain(|key, _| {
+            let out = exclusions.covers(key, &left_out_folders);
+            if out {
+                forget_left_out.push(key.clone());
+            }
+            !out
+        });
+    }
+
+    let destination_scan = if source_scan.stopped {
+        ScanResult::default()
+    } else if destination.is_dir() {
+        let filter = Filter {
+            exclusions,
+            folders: Some(&left_out_folders),
+        };
+        scan_side(Side::Destination, destination, filter, stored.len() as u64)
     } else {
+        on_event(Event::Scanning {
+            side: Side::Destination,
+            expected: 0,
+        });
         ScanResult::default()
     };
+    // An incomplete scan would make files look removed. Stop before any decision.
+    if source_scan.stopped || destination_scan.stopped || is_cancelled(options) {
+        report.cancelled = true;
+        return finish(report, writable, destination, &stamp);
+    }
     for err in source_scan.errors.iter().chain(&destination_scan.errors) {
         report.errors.push(ErrorItem::new(&err.path, &err.message));
     }
+    // A folder that only the destination rules leave out stays out on both sides.
+    if !destination_scan.left_out.is_empty() {
+        let only_destination: HashSet<String> = destination_scan
+            .left_out
+            .iter()
+            .map(|folder| paths::fold_key(&folder.path))
+            .collect();
+        source_scan
+            .files
+            .retain(|key, _| !exclusions.covers(key, &only_destination));
+        stored.retain(|key, _| {
+            let out = exclusions.covers(key, &only_destination);
+            if out {
+                forget_left_out.push(key.clone());
+            }
+            !out
+        });
+        left_out_folders.extend(only_destination);
+    }
+    report.left_out = source_scan
+        .left_out
+        .iter()
+        .chain(&destination_scan.left_out)
+        .map(|folder| LeftOutItem {
+            path: folder.path.clone(),
+            reason: folder.reason.to_owned(),
+        })
+        .collect();
+    report.left_out_forgotten = forget_left_out.len() as u64;
     if writable.is_some() {
         for partial in &destination_scan.partials {
             match fs::remove_file(partial) {
@@ -117,11 +214,6 @@ pub fn run(
             }
         }
     }
-    let stored = match &index {
-        Some(index) => index.load_all()?,
-        None => Default::default(),
-    };
-
     let keys: BTreeSet<&String> = source_scan
         .files
         .keys()
@@ -160,15 +252,42 @@ pub fn run(
         .fold((0, 0), |(files, bytes), step| {
             (files + 1, bytes + step.source.map_or(0, |s| s.size))
         });
+    let already = plan
+        .iter()
+        .filter(|step| step.action == Action::Skip && step.source.is_some())
+        .count() as u64;
     on_event(Event::Planned {
         files: total_files,
         bytes: total_bytes,
+        already,
     });
 
     let replaced_root = destination.join(STATE_DIR).join(REPLACED_DIR).join(&stamp);
     let (mut done_files, mut done_bytes) = (0, 0);
 
+    // Files enter the index in groups. If the program stops abruptly, the files of
+    // the last group are in the destination but not in the index; the next run finds
+    // them identical and records them without copying ("Adopt").
+    if let Some(index) = writable {
+        index.begin()?;
+        for key in &forget_left_out {
+            index.remove(key)?;
+        }
+    }
+    let mut last_commit = Instant::now();
+
     for step in &plan {
+        if let Some(index) = writable {
+            if last_commit.elapsed() >= COMMIT_INTERVAL {
+                index.commit()?;
+                index.begin()?;
+                last_commit = Instant::now();
+            }
+        }
+        if is_cancelled(options) {
+            report.cancelled = true;
+            break;
+        }
         match step.action {
             Action::Skip => {
                 if step.source.is_some() {
@@ -184,12 +303,21 @@ pub fn run(
                     let target = paths::join_relative(destination, target_relative);
                     let replaced =
                         is_update.then(|| paths::join_relative(&replaced_root, target_relative));
-                    match copy_file(
+                    let bytes_before = done_bytes;
+                    let copy = copy_file_with_progress(
                         &paths::join_relative(source, &step.path),
                         &target,
                         src.mtime_ms,
                         replaced.as_deref(),
-                    ) {
+                        &mut |copied| {
+                            on_event(Event::FileProgress {
+                                path: &step.path,
+                                done_bytes: bytes_before + copied,
+                            });
+                            !is_cancelled(options)
+                        },
+                    );
+                    match copy {
                         Ok(copied) => {
                             let entry = IndexEntry {
                                 source: src,
@@ -197,6 +325,10 @@ pub fn run(
                             };
                             index.upsert(&step.key, &step.path, &entry, now_ms())?;
                             report.bytes_copied += src.size;
+                        }
+                        Err(_) if is_cancelled(options) => {
+                            report.cancelled = true;
+                            break;
                         }
                         Err(err) => {
                             report
@@ -254,7 +386,20 @@ pub fn run(
             }
         }
     }
+    if let Some(index) = writable {
+        index.commit()?;
+    }
 
+    finish(report, writable, destination, &stamp)
+}
+
+/// Saves a copy of the index and the report.
+fn finish(
+    mut report: Report,
+    writable: Option<&Index>,
+    destination: &Path,
+    stamp: &str,
+) -> Result<Report> {
     if let Some(index) = writable {
         if let Err(err) = index.save_previous_copy(destination) {
             report.errors.push(ErrorItem::new(
@@ -265,9 +410,16 @@ pub fn run(
     }
     report.finished_at = Local::now().to_rfc3339();
     if writable.is_some() {
-        report.save(&destination.join(STATE_DIR).join(REPORTS_DIR), &stamp)?;
+        report.save(&destination.join(STATE_DIR).join(REPORTS_DIR), stamp)?;
     }
     Ok(report)
+}
+
+fn is_cancelled(options: &Options) -> bool {
+    options
+        .cancel
+        .as_ref()
+        .is_some_and(|cancel| cancel.load(Ordering::Relaxed))
 }
 
 /// The destination drive must be connected. A missing folder on it is created.
@@ -286,6 +438,29 @@ fn prepare_destination(destination: &Path, dry_run: bool) -> Result<()> {
         fs::create_dir_all(destination)?;
     }
     Ok(())
+}
+
+/// Refuses a source and a destination inside each other. Returns the source id.
+pub(crate) fn check_not_nested(source: &Path, destination: &Path) -> Result<String> {
+    let source_id = comparable(source)?;
+    let destination_id = comparable(destination)?;
+    if source_id.starts_with(&destination_id) || destination_id.starts_with(&source_id) {
+        return Err(Error::NestedFolders(
+            source.to_path_buf(),
+            destination.to_path_buf(),
+        ));
+    }
+    Ok(source_id.to_string_lossy().into_owned())
+}
+
+/// Refuses an index that belongs to another source. Records the source when missing.
+pub(crate) fn check_index_source(index: &Index, source_id: &str, record: bool) -> Result<()> {
+    match index.meta(META_SOURCE)? {
+        Some(stored) if stored != source_id => Err(Error::IndexBelongsToOtherSource(stored)),
+        Some(_) => Ok(()),
+        None if record => index.set_meta(META_SOURCE, source_id),
+        None => Ok(()),
+    }
 }
 
 /// Absolute path, folded like index keys, to compare folders.

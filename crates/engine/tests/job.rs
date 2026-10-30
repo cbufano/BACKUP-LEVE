@@ -2,11 +2,13 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use backup_leve_engine::decision::{ConflictKind, Mode};
 use backup_leve_engine::paths::{PARTIAL_SUFFIX, REPLACED_DIR, STATE_DIR};
 use backup_leve_engine::report::FileItem;
-use backup_leve_engine::{run, Error, Options, Report};
+use backup_leve_engine::{run, Error, Event, Exclusions, Options, Report, Side};
 use filetime::FileTime;
 use tempfile::TempDir;
 
@@ -48,7 +50,12 @@ fn try_sync(f: &Folders, mode: Mode, dry_run: bool) -> backup_leve_engine::Resul
     run(
         &f.source,
         &f.destination,
-        &Options { mode, dry_run },
+        &Options {
+            mode,
+            dry_run,
+            cancel: None,
+            ..Default::default()
+        },
         |_| {},
     )
 }
@@ -267,6 +274,8 @@ fn destination_inside_source_is_refused() {
         &Options {
             mode: Mode::Sync,
             dry_run: false,
+            cancel: None,
+            ..Default::default()
         },
         |_| {},
     );
@@ -287,6 +296,8 @@ fn destination_of_another_source_is_refused() {
         &Options {
             mode: Mode::Sync,
             dry_run: false,
+            cancel: None,
+            ..Default::default()
         },
         |_| {},
     );
@@ -303,4 +314,190 @@ fn missing_source_is_an_error() {
         try_sync(&f, Mode::Sync, false),
         Err(Error::SourceNotFound(_))
     ));
+}
+
+#[test]
+fn stop_while_reading_the_destination_decides_nothing() {
+    let f = synced();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut events = Vec::new();
+
+    let report = run(
+        &f.source,
+        &f.destination,
+        &Options {
+            mode: Mode::Sync,
+            dry_run: false,
+            cancel: Some(cancel.clone()),
+            ..Default::default()
+        },
+        |event| match event {
+            Event::Scanning { side, .. } => events.push(format!("{side:?}")),
+            Event::ScanProgress {
+                side: Side::Destination,
+                ..
+            } => cancel.store(true, Ordering::Relaxed),
+            _ => {}
+        },
+    )
+    .unwrap();
+
+    assert_eq!(events, ["Source", "Destination"]);
+    assert!(report.cancelled);
+    assert!(report.conflicts.is_empty());
+    assert!(report.removed_from_source.is_empty());
+    assert_eq!(report.forgotten, 0);
+
+    let again = sync(&f, Mode::Sync);
+    assert!(again.copied.is_empty());
+    assert!(again.conflicts.is_empty());
+    assert_eq!(again.unchanged, 2);
+}
+
+#[test]
+fn a_resumed_run_says_what_is_already_in_the_backup() {
+    let f = synced();
+    write(&f.source.join("c.txt"), "novo", T0);
+    let mut planned = None;
+    let mut expected = Vec::new();
+
+    run(
+        &f.source,
+        &f.destination,
+        &Options::default(),
+        |event| match event {
+            Event::Scanning { side, expected: n } => expected.push((side, n)),
+            Event::Planned { files, already, .. } => planned = Some((files, already)),
+            _ => {}
+        },
+    )
+    .unwrap();
+
+    assert_eq!(expected, [(Side::Source, 0), (Side::Destination, 2)]);
+    assert_eq!(planned, Some((1, 2)));
+}
+
+fn sync_leaving_out(f: &Folders, exclusions: Exclusions) -> Report {
+    run(
+        &f.source,
+        &f.destination,
+        &Options {
+            exclusions,
+            ..Default::default()
+        },
+        |_| {},
+    )
+    .unwrap()
+}
+
+/// A JavaScript project: `node_modules` and `dist` come back with `npm install` and the build.
+fn js_project(f: &Folders) {
+    let site = f.source.join("site");
+    write(&site.join("package.json"), "{}", T0);
+    write(&site.join("package-lock.json"), "{}", T0);
+    write(&site.join("src").join("main.ts"), "código", T0);
+    write(
+        &site.join("node_modules").join("react").join("index.js"),
+        "react",
+        T0,
+    );
+    write(&site.join("dist").join("index.html"), "build", T0);
+}
+
+#[test]
+fn rebuildable_folders_are_not_copied() {
+    let f = folders();
+    js_project(&f);
+
+    let report = sync_leaving_out(&f, Exclusions::new(true, &[]));
+
+    let mut copied = names(&report.copied);
+    copied.sort();
+    assert_eq!(
+        copied,
+        [
+            "site/package-lock.json",
+            "site/package.json",
+            "site/src/main.ts"
+        ]
+    );
+    let mut left_out: Vec<&str> = report
+        .left_out
+        .iter()
+        .map(|item| item.path.as_str())
+        .collect();
+    left_out.sort();
+    assert_eq!(left_out, ["site/dist", "site/node_modules"]);
+    assert!(!f.destination.join("site").join("node_modules").exists());
+}
+
+#[test]
+fn leaving_out_a_folder_already_in_the_backup_keeps_its_copies() {
+    let f = folders();
+    js_project(&f);
+    let first = sync_leaving_out(&f, Exclusions::new(false, &[]));
+    assert_eq!(first.copied.len(), 5);
+
+    let report = sync_leaving_out(&f, Exclusions::new(true, &[]));
+
+    // The copies stay, and nothing looks removed from the source or deleted in the destination.
+    assert!(report.conflicts.is_empty());
+    assert!(report.removed_from_source.is_empty());
+    assert_eq!(report.left_out_forgotten, 2);
+    assert_eq!(report.unchanged, 3);
+    let copy = f
+        .destination
+        .join("site")
+        .join("node_modules")
+        .join("react")
+        .join("index.js");
+    assert_eq!(read(&copy), "react");
+
+    // Back to copying everything: the copies are equal and enter the index without a copy.
+    let back = sync_leaving_out(&f, Exclusions::new(false, &[]));
+    assert!(back.conflicts.is_empty());
+    assert!(back.copied.is_empty());
+    assert_eq!(back.adopted.len(), 2);
+}
+
+#[test]
+fn names_chosen_by_the_user_stay_out() {
+    let f = folders();
+    write(&f.source.join("a.txt"), "a", T0);
+    write(&f.source.join("rascunho.TMP"), "x", T0);
+    write(&f.source.join("Downloads").join("filme.mp4"), "x", T0);
+
+    let report = sync_leaving_out(
+        &f,
+        Exclusions::new(false, &["downloads".into(), "*.tmp".into()]),
+    );
+
+    assert_eq!(names(&report.copied), ["a.txt"]);
+    assert!(report.left_out.is_empty());
+}
+
+#[test]
+fn a_folder_that_only_the_destination_leaves_out_stays_out_on_both_sides() {
+    let f = folders();
+    js_project(&f);
+    sync_leaving_out(&f, Exclusions::new(false, &[]));
+    // The source loses its lock file. Its rules now copy `dist`; the destination still has one.
+    fs::remove_file(f.source.join("site").join("package-lock.json")).unwrap();
+    write(
+        &f.source.join("site").join("dist").join("novo.js"),
+        "novo",
+        T0,
+    );
+
+    let report = sync_leaving_out(&f, Exclusions::new(true, &[]));
+
+    assert!(report.conflicts.is_empty(), "{:?}", report.conflicts);
+    assert!(report.copied.is_empty());
+    assert!(!f
+        .destination
+        .join("site")
+        .join("dist")
+        .join("novo.js")
+        .exists());
+    assert!(report.left_out.iter().any(|item| item.path == "site/dist"));
 }

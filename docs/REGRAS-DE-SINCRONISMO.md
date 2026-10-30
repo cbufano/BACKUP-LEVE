@@ -81,17 +81,70 @@ No fim, a tela de conflitos mostra a lista. Para cada arquivo, o usuário escolh
 |---|---|
 | A origem vence | A origem é copiada para o destino. A versão do destino vai para `substituidos`. |
 | O destino vence | O destino é copiado para a origem. A versão da origem vai para a Lixeira do Windows. |
-| Manter os dois | No destino ficam as duas versões. Cada nome recebe a data de modificação: `relatorio (origem 2026-10-28 14-30).docx` e `relatorio (destino 2026-10-29 09-12).docx`. A origem não muda. |
+| Manter os dois | No destino ficam as duas versões. A versão do destino recebe a data de modificação no nome: `relatorio (destino 2026-10-29 09-12).docx`. A versão da origem é copiada com o nome original. A origem não muda. |
 | Decidir depois | Nada muda. O conflito aparece de novo na próxima execução. |
 
 O programa não precisa gravar os conflitos. A cada execução, ele compara de novo o estado atual com o índice, e o conflito aparece outra vez.
 Por isso, depois de uma execução agendada (sem janela), a tela de conflitos aparece na próxima vez que o usuário abrir o programa.
+
+Nota: em "Manter os dois", a cópia da origem fica com o nome original. Assim, o backup continua a seguir o arquivo da origem nas próximas execuções. A versão com data fica fora do índice e o programa não mexe mais nela.
+
+Antes de aplicar uma escolha, o programa confere o arquivo de novo. Se o arquivo mudou depois da verificação, o programa não faz nada e mostra o motivo.
+
+Cada lote de escolhas fica registrado em `<destino>\.backup-leve\relatorios\decisoes_<data>.json`.
 
 Para o conflito "apagado no destino", as opções são:
 
 - **Copiar de novo**: a origem é copiada para o destino.
 - **Apagar na origem**: o arquivo da origem vai para a Lixeira do Windows.
 - **Decidir depois**.
+
+## O que fica de fora
+
+Algumas pastas são criadas de novo por um programa. Exemplo: o `npm install` cria a pasta `node_modules` a partir do `package.json`.
+Essas pastas são grandes e têm muitos arquivos. O backup fica mais rápido sem elas.
+
+### Pastas recriáveis
+
+A opção "Pular as pastas que um programa cria de novo" vem ligada em todo perfil.
+O programa pula uma pasta só quando encontra, na mesma pasta-mãe, o arquivo que a recria.
+Uma pasta `node_modules` sem `package.json` ao lado é do usuário. O programa copia essa pasta.
+
+| Pasta | Só quando ao lado existe | Quem cria de novo |
+|---|---|---|
+| `node_modules`, `.next`, `.nuxt`, `.svelte-kit`, `.angular`, `.astro`, `.turbo`, `.parcel-cache`, `.vite`, `.expo` | `package.json` | O gerenciador de pacotes JavaScript ou o framework. |
+| `dist`, `build`, `out`, `.output` | `package.json` e um arquivo de trava (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb` ou `bun.lock`) | O build do projeto JavaScript. |
+| `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache` | (sempre) | Python e as ferramentas dele. |
+| `.venv`, `venv` | `requirements.txt`, `pyproject.toml`, `setup.py` ou `Pipfile` | O pip, a partir da lista de pacotes. |
+| `target` | `Cargo.toml` | O cargo (Rust). |
+| `build`, `.gradle` | `build.gradle`, `build.gradle.kts`, `settings.gradle` ou `settings.gradle.kts` | O Gradle (Android). |
+| `bin`, `obj` | um arquivo `*.csproj`, `*.vbproj` ou `*.fsproj` | O Visual Studio (.NET). |
+| `.vs` | um arquivo `*.sln` | O Visual Studio. |
+| `.dart_tool`, `build` | `pubspec.yaml` | O Flutter. |
+| `Pods` | `Podfile` | O CocoaPods (iOS). |
+| Qualquer nome | Um arquivo `CACHEDIR.TAG` válido dentro da pasta | O programa que marcou a pasta como cache. |
+
+Nota: a pasta `dist` só fica de fora com o arquivo de trava. Um plugin do WordPress pode ter `package.json` e precisar da pasta `dist` que veio com ele.
+
+Nota: a pasta `vendor` não está na lista. Os plugins do WordPress guardam nela código necessário.
+
+Nota: um ambiente `.venv` sem lista de pacotes fica no backup, mesmo com `CACHEDIR.TAG`. Sem a lista, ninguém sabe o que instalar de novo.
+
+### Nomes escolhidos pelo usuário
+
+O perfil aceita outros nomes para pular, um por linha. Exemplos: `Downloads` e `*.tmp`.
+O nome vale para arquivos e pastas, em qualquer lugar da origem. A comparação não diferencia maiúsculas de minúsculas.
+Um nome com `/` ou `\` não vale.
+
+### Como as pastas de fora entram na comparação
+
+1. A origem decide quais pastas ficam de fora. A leitura do destino também pula essas pastas.
+2. Uma pasta que só as regras do destino deixam de fora fica de fora nos dois lados.
+3. Os registros do índice dentro de uma pasta de fora saem do índice.
+4. As cópias que já estão no destino ficam lá. O programa não apaga nada e não mostra conflito.
+5. O relatório lista as pastas de fora e diz quem cria cada uma de novo.
+
+Se o usuário desliga a opção depois, a pasta volta a ser copiada. As cópias antigas iguais à origem são registradas sem cópia.
 
 ## Cópia segura
 
@@ -115,6 +168,17 @@ O programa para antes de copiar qualquer arquivo nestes casos:
 | O destino já recebe o backup de outra origem. | Dois backups no mesmo índice se misturam. |
 
 Um erro em um só arquivo não para a execução. O arquivo vai para a lista de erros, e a próxima execução tenta de novo.
+
+O usuário pode parar a execução a qualquer momento:
+
+| Momento | O que acontece |
+|---|---|
+| Durante a leitura das pastas | O programa não decide nada sobre os arquivos. O índice fica como estava. |
+| Durante a cópia | O arquivo pela metade é apagado. Os arquivos já copiados ficam no índice. |
+
+Nos dois casos, o relatório marca a execução como interrompida. A próxima execução copia só o que falta.
+
+Se o programa fecha de repente (queda de energia, por exemplo), até um segundo de cópias fica sem registro no índice. A próxima execução encontra esses arquivos iguais à origem e registra cada um sem copiar de novo.
 
 ## Pontos abertos
 

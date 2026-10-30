@@ -1,7 +1,7 @@
 //! Safe copy: partial file first, final name only when the copy is complete.
 
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use filetime::FileTime;
@@ -9,6 +9,11 @@ use filetime::FileTime;
 use crate::decision::Snapshot;
 use crate::paths::PARTIAL_SUFFIX;
 use crate::scan::mtime_ms;
+
+/// Files from this size up are copied in blocks, with progress after each block.
+/// Smaller files use the system copy, which is faster for many small files.
+pub const BLOCK_COPY_FROM: u64 = 32 * 1024 * 1024;
+const BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 /// Copies `source` to `target` and gives the copy the modification time `source_mtime_ms`.
 ///
@@ -22,15 +27,44 @@ pub fn copy_file(
     source_mtime_ms: i64,
     replaced: Option<&Path>,
 ) -> io::Result<Snapshot> {
+    copy_file_with_progress(source, target, source_mtime_ms, replaced, &mut |_| true)
+}
+
+/// Like [`copy_file`]. For large files, `on_bytes` receives the bytes copied so far
+/// after each block. When it returns `false`, the copy stops with `ErrorKind::Interrupted`.
+pub fn copy_file_with_progress(
+    source: &Path,
+    target: &Path,
+    source_mtime_ms: i64,
+    replaced: Option<&Path>,
+    on_bytes: &mut dyn FnMut(u64) -> bool,
+) -> io::Result<Snapshot> {
+    if replaced.is_none() && target.symlink_metadata().is_ok() {
+        return Err(already_exists());
+    }
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
     let partial = partial_path(target);
-    let result = copy_through_partial(source, target, &partial, source_mtime_ms, replaced);
+    let result = copy_through_partial(
+        source,
+        target,
+        &partial,
+        source_mtime_ms,
+        replaced,
+        on_bytes,
+    );
     if result.is_err() {
         let _ = fs::remove_file(&partial);
     }
     result
+}
+
+fn already_exists() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "o arquivo já existe no destino",
+    )
 }
 
 fn copy_through_partial(
@@ -39,16 +73,18 @@ fn copy_through_partial(
     partial: &Path,
     source_mtime_ms: i64,
     replaced: Option<&Path>,
+    on_bytes: &mut dyn FnMut(u64) -> bool,
 ) -> io::Result<Snapshot> {
-    fs::copy(source, partial)?;
+    if fs::metadata(source)?.len() >= BLOCK_COPY_FROM {
+        copy_in_blocks(source, partial, on_bytes)?;
+    } else {
+        fs::copy(source, partial)?;
+    }
     set_mtime(partial, source_mtime_ms)?;
 
     if target.symlink_metadata().is_ok() {
         let Some(replaced) = replaced else {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "o arquivo já existe no destino",
-            ));
+            return Err(already_exists());
         };
         if let Some(parent) = replaced.parent() {
             fs::create_dir_all(parent)?;
@@ -59,6 +95,35 @@ fn copy_through_partial(
 
     let metadata = fs::metadata(target)?;
     Ok(Snapshot::new(metadata.len(), mtime_ms(&metadata)))
+}
+
+fn copy_in_blocks(
+    source: &Path,
+    partial: &Path,
+    on_bytes: &mut dyn FnMut(u64) -> bool,
+) -> io::Result<()> {
+    let mut reader = File::open(source)?;
+    let mut writer = File::create(partial)?;
+    let mut block = vec![0u8; BLOCK_SIZE];
+    let mut copied = 0u64;
+    loop {
+        let read = match reader.read(&mut block) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(err),
+        };
+        writer.write_all(&block[..read])?;
+        copied += read as u64;
+        if !on_bytes(copied) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "cópia interrompida pelo usuário",
+            ));
+        }
+    }
+    drop(writer);
+    fs::set_permissions(partial, fs::metadata(source)?.permissions())
 }
 
 /// `<name>.backup-leve-parcial` next to `target`.
@@ -143,6 +208,33 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&target).unwrap(), "novo");
         assert_eq!(fs::read_to_string(&replaced).unwrap(), "antigo");
+    }
+
+    #[test]
+    fn large_files_report_progress_and_can_be_stopped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("grande.bin");
+        let size = BLOCK_COPY_FROM + 1_000;
+        fs::write(&source, vec![7u8; size as usize]).unwrap();
+
+        let mut steps = Vec::new();
+        let target = tmp.path().join("copia.bin");
+        let snapshot = copy_file_with_progress(&source, &target, MTIME_MS, None, &mut |bytes| {
+            steps.push(bytes);
+            true
+        })
+        .unwrap();
+        assert_eq!(snapshot.size, size);
+        assert_eq!(*steps.last().unwrap(), size);
+        assert!(steps.len() > 1);
+        assert_eq!(fs::read(&target).unwrap(), fs::read(&source).unwrap());
+
+        let stopped = tmp.path().join("parada.bin");
+        let err =
+            copy_file_with_progress(&source, &stopped, MTIME_MS, None, &mut |_| false).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert!(!stopped.exists());
+        assert!(!partial_path(&stopped).exists());
     }
 
     #[test]

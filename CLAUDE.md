@@ -3,7 +3,7 @@
 ## O projeto
 
 Programa open source de backup de pastas para um disco de destino. Vai para o GitHub.
-Motor em Rust (`crates/engine`). Interface em Tauri 2 + React + TypeScript (`app/`, ainda não criada).
+Motor em Rust (`crates/engine`). Linha de comando em `crates/cli`. Janela em Tauri 2 + React + TypeScript (`app/`).
 
 ## Leia antes de mexer no código
 
@@ -35,7 +35,13 @@ Motor em Rust (`crates/engine`). Interface em Tauri 2 + React + TypeScript (`app
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cd app && npm run build                      # tipos e build da tela
+cd app && npm run tauri build -- --no-bundle # gera backup-leve-janela.exe
 ```
+
+- Rode os testes com `TMP` e `TEMP` apontando para `temp/testes`. Assim nada fica no Temp do Windows.
+- Não abra a janela pela sessão do Claude. O dono abre e testa.
+- Para revisar o visual sem a janela: `cd app && npm run dev` usa os dados de `app/src/mock.ts`. O endereço `http://localhost:1420/#executando` mostra uma sincronização de exemplo.
 
 ## Ambiente do dono
 

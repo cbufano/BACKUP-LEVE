@@ -54,7 +54,10 @@ impl Index {
     pub fn open(destination: &Path) -> Result<Self> {
         fs::create_dir_all(destination.join(STATE_DIR))?;
         let conn = Connection::open(Self::path(destination))?;
-        // WAL keeps one commit per copied file cheap.
+        // One program writes the index at a time. The exclusive lock is taken once,
+        // and WAL then needs no shared-memory file. On a network drive, this saves
+        // several round trips to the server on each commit.
+        conn.execute_batch("PRAGMA locking_mode = EXCLUSIVE;")?;
         conn.query_row("PRAGMA journal_mode = WAL", [], |row| {
             row.get::<_, String>(0)
         })?;
@@ -174,6 +177,31 @@ impl Index {
         Ok(())
     }
 
+    /// Number of files in the index.
+    pub fn count(&self) -> Result<u64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))?;
+        Ok(count as u64)
+    }
+
+    /// Starts a group of changes. The changes are saved together by
+    /// [`Index::commit`]. A change that was not committed is lost.
+    pub fn begin(&self) -> Result<()> {
+        if self.conn.is_autocommit() {
+            self.conn.execute_batch("BEGIN")?;
+        }
+        Ok(())
+    }
+
+    /// Saves the group of changes started by [`Index::begin`].
+    pub fn commit(&self) -> Result<()> {
+        if !self.conn.is_autocommit() {
+            self.conn.execute_batch("COMMIT")?;
+        }
+        Ok(())
+    }
+
     /// Writes a copy of the index to `indice.anterior.sqlite`.
     pub fn save_previous_copy(&self, destination: &Path) -> Result<()> {
         let target = destination.join(STATE_DIR).join(PREVIOUS_INDEX_FILE);
@@ -249,6 +277,34 @@ mod tests {
             .join(STATE_DIR)
             .join(PREVIOUS_INDEX_FILE)
             .is_file());
+    }
+
+    #[test]
+    fn groups_changes_and_loses_only_what_was_not_committed() {
+        let tmp = tempfile::tempdir().unwrap();
+        {
+            let index = Index::open(tmp.path()).unwrap();
+            index.begin().unwrap();
+            index.upsert("a.txt", "a.txt", &entry(1), 5).unwrap();
+            index.upsert("b.txt", "b.txt", &entry(2), 5).unwrap();
+            index.commit().unwrap();
+            index.begin().unwrap();
+            index.upsert("c.txt", "c.txt", &entry(3), 6).unwrap();
+            // Closed without commit, like a program that stops abruptly.
+        }
+        let index = Index::open(tmp.path()).unwrap();
+        assert_eq!(index.count().unwrap(), 2);
+        assert!(!index.load_all().unwrap().contains_key("c.txt"));
+    }
+
+    #[test]
+    fn a_second_program_cannot_write_while_the_index_is_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = Index::open(tmp.path()).unwrap();
+        first.upsert("a.txt", "a.txt", &entry(1), 5).unwrap();
+        assert!(Index::open(tmp.path()).is_err());
+        drop(first);
+        assert_eq!(Index::open(tmp.path()).unwrap().count().unwrap(), 1);
     }
 
     #[test]

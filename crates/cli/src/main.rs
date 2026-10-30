@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use backup_leve_engine::decision::Mode;
 use backup_leve_engine::report::{conflict_label, format_bytes, mode_label};
-use backup_leve_engine::{run, Event, Options, Report};
+use backup_leve_engine::{run, Event, Exclusions, Options, Report, Side};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// Lines of conflicts and errors shown in the terminal. The report has all of them.
@@ -46,6 +46,12 @@ enum Command {
         /// Mostra o que seria feito, sem copiar nada.
         #[arg(long)]
         simulacao: bool,
+        /// Copia também as pastas que um programa cria de novo (node_modules, target...).
+        #[arg(long)]
+        copiar_recriaveis: bool,
+        /// Nome de arquivo ou pasta que fica de fora. Aceita `*.tmp`. Pode repetir.
+        #[arg(long, value_name = "NOME")]
+        pular: Vec<String>,
     },
 }
 
@@ -72,10 +78,14 @@ fn main() -> ExitCode {
         destino,
         modo,
         simulacao,
+        copiar_recriaveis,
+        pular,
     } = Cli::parse().command;
     let options = Options {
         mode: modo.into(),
         dry_run: simulacao,
+        cancel: None,
+        exclusions: Exclusions::new(!copiar_recriaveis, &pular),
     };
 
     println!("Backup Leve {}", env!("CARGO_PKG_VERSION"));
@@ -106,6 +116,9 @@ struct Progress {
     enabled: bool,
     total_files: u64,
     total_bytes: u64,
+    /// Files the index expects in the folder being read.
+    expected: u64,
+    done_files: u64,
     last_draw: Option<Instant>,
     drawn: bool,
 }
@@ -116,6 +129,8 @@ impl Progress {
             enabled: std::io::stderr().is_terminal(),
             total_files: 0,
             total_bytes: 0,
+            expected: 0,
+            done_files: 0,
             last_draw: None,
             drawn: false,
         }
@@ -123,37 +138,76 @@ impl Progress {
 
     fn show(&mut self, event: Event<'_>) {
         match event {
-            Event::Scanning => println!("Lendo as pastas..."),
-            Event::Planned { files, bytes } => {
+            Event::Scanning { side, expected } => {
+                self.finish();
+                self.expected = expected;
+                println!("Lendo {}...", side_label(side));
+            }
+            Event::ScanProgress { found, .. } => {
+                if self.due() {
+                    if self.expected > 0 {
+                        eprint!("\r  {found} de ~{} arquivos   ", self.expected);
+                    } else {
+                        eprint!("\r  {found} arquivos encontrados   ");
+                    }
+                    self.mark_drawn();
+                }
+            }
+            Event::Planned {
+                files,
+                bytes,
+                already,
+            } => {
+                self.finish();
                 self.total_files = files;
                 self.total_bytes = bytes;
+                if already > 0 {
+                    println!("Já no backup, sem mudança: {already} arquivos");
+                }
                 println!("A copiar: {files} arquivos ({})", format_bytes(bytes));
+            }
+            Event::FileProgress { done_bytes, .. } => {
+                let done_files = self.done_files;
+                self.draw(done_files, done_bytes);
             }
             Event::FileDone {
                 done_files,
                 done_bytes,
                 ..
             } => {
-                let due = self
-                    .last_draw
-                    .is_none_or(|last| last.elapsed() >= Duration::from_millis(200));
-                if !self.enabled || (!due && done_files < self.total_files) {
-                    return;
-                }
-                let percent = (done_bytes * 100)
-                    .checked_div(self.total_bytes)
-                    .unwrap_or(100);
-                eprint!(
-                    "\r  {done_files}/{} arquivos · {} de {} · {percent}%   ",
-                    self.total_files,
-                    format_bytes(done_bytes),
-                    format_bytes(self.total_bytes),
-                );
-                let _ = std::io::stderr().flush();
-                self.last_draw = Some(Instant::now());
-                self.drawn = true;
+                self.done_files = done_files;
+                self.draw(done_files, done_bytes);
             }
         }
+    }
+
+    fn due(&self) -> bool {
+        self.enabled
+            && self
+                .last_draw
+                .is_none_or(|last| last.elapsed() >= Duration::from_millis(200))
+    }
+
+    fn mark_drawn(&mut self) {
+        let _ = std::io::stderr().flush();
+        self.last_draw = Some(Instant::now());
+        self.drawn = true;
+    }
+
+    fn draw(&mut self, done_files: u64, done_bytes: u64) {
+        if !self.enabled || (!self.due() && done_files < self.total_files) {
+            return;
+        }
+        let percent = (done_bytes * 100)
+            .checked_div(self.total_bytes)
+            .unwrap_or(100);
+        eprint!(
+            "\r  {done_files}/{} arquivos · {} de {} · {percent}%   ",
+            self.total_files,
+            format_bytes(done_bytes),
+            format_bytes(self.total_bytes),
+        );
+        self.mark_drawn();
     }
 
     fn finish(&mut self) {
@@ -161,6 +215,13 @@ impl Progress {
             eprintln!();
             self.drawn = false;
         }
+    }
+}
+
+fn side_label(side: Side) -> &'static str {
+    match side {
+        Side::Source => "a origem",
+        Side::Destination => "o destino",
     }
 }
 
@@ -190,10 +251,18 @@ fn print_summary(report: &Report) {
             "Removidos na origem",
             report.removed_from_source.len() as u64,
         ),
+        ("Pastas de fora", report.left_out.len() as u64),
         ("Conflitos", report.conflicts.len() as u64),
         ("Erros", report.errors.len() as u64),
     ] {
         println!("  {label:<24}{value}");
+    }
+    if report.left_out_forgotten > 0 {
+        println!(
+            "  O índice deixou de acompanhar {} arquivos que agora ficam de fora.",
+            report.left_out_forgotten
+        );
+        println!("  As cópias desses arquivos continuam no destino.");
     }
 
     if !report.conflicts.is_empty() {

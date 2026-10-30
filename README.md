@@ -3,7 +3,7 @@
 Backup de pastas para um disco externo, leve e seguro.
 Você escolhe as pastas, o programa copia, lembra o que copiou e avisa quando algo no disco de backup mudou.
 
-> **Estado:** em desenvolvimento (pré-alfa). O motor funciona pela linha de comando. A janela ainda não existe. Ainda não use em dados importantes.
+> **Estado:** em desenvolvimento (pré-alfa). O motor, a linha de comando e a janela funcionam. Ainda não use em dados importantes.
 
 *English summary: lightweight, on-demand folder backup to an external drive. It keeps an index of every copied file, never overwrites silently, and asks the user to resolve files changed on the backup drive. Built with Rust + Tauri. Docs are in Portuguese for now.*
 
@@ -63,9 +63,10 @@ Passos:
 
 1. Clone o repositório.
 2. Rode os testes: `cargo test --workspace`.
-3. Compile o programa: `cargo build --release`.
+3. Compile a linha de comando: `cargo build --release -p backup-leve-cli`.
+4. Compile a janela: na pasta `app`, rode `npm install` e depois `npm run tauri build -- --no-bundle`.
 
-O programa fica em `target/release/backup-leve.exe`. A interface ainda não existe. Veja [app/README.md](app/README.md).
+Os programas ficam em `target/release/`: `backup-leve.exe` (linha de comando) e `backup-leve-janela.exe` (janela). Veja [app/README.md](app/README.md).
 
 ## Usar pela linha de comando
 
@@ -78,6 +79,8 @@ backup-leve sincronizar --origem "D:\Documentos" --destino "E:\Backup\Documentos
 | `--modo sincronizar` | Copia arquivos novos e atualiza os alterados na origem. É o padrão. |
 | `--modo somente-novos` | Copia só arquivos novos. Os alterados na origem aparecem no relatório. |
 | `--simulacao` | Mostra o que seria feito. Não copia nada e não cria nada no destino. |
+| `--copiar-recriaveis` | Copia também as pastas que um programa cria de novo (`node_modules`, `target`...). Sem esta opção, elas ficam de fora. |
+| `--pular <nome>` | Deixa de fora os arquivos e pastas com este nome. Aceita `*.tmp`. Pode repetir. |
 
 No fim, o programa mostra um resumo e grava o relatório em `<destino>\.backup-leve\relatorios\`.
 
