@@ -1223,3 +1223,34 @@ textarea {
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-weight: 600;
 }
+
+.collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.collapse-toggle h2 {
+  margin: 0;
+}
+
+.collapse-toggle:hover h2 {
+  color: var(--petrol);
+}
+
+.chevron {
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.chevron.closed {
+  transform: rotate(-90deg);
+}

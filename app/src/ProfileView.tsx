@@ -14,7 +14,10 @@ interface Props {
   onReports: () => void;
 }
 
-const modes: { mode: Mode; title: string; text: string }[] = [
+/** Remembers whether the "Pastas copiadas" frame is minimized. */
+const FOLDERS_CLOSED_KEY = "pastas-copiadas-minimizado";
+
+const modes:{ mode: Mode; title: string; text: string }[] = [
   {
     mode: "sincronizar",
     title: "Atualizar o backup",
@@ -30,6 +33,21 @@ const modes: { mode: Mode; title: string; text: string }[] = [
 export function ProfileView({ profile, problems, connected, onChange, onDelete, onRun, onReports }: Props) {
   const [name, setName] = useState(profile.nome);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [foldersClosed, setFoldersClosed] = useState(() => {
+    try {
+      return localStorage.getItem(FOLDERS_CLOSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleFolders = (closed: boolean) => {
+    setFoldersClosed(closed);
+    try {
+      localStorage.setItem(FOLDERS_CLOSED_KEY, closed ? "1" : "0");
+    } catch {
+      // The choice is only a convenience.
+    }
+  };
   useEffect(() => {
     setName(profile.nome);
     setConfirmDelete(false);
@@ -95,12 +113,23 @@ export function ProfileView({ profile, problems, connected, onChange, onDelete, 
 
       <section className="block">
         <div className="block-head">
-          <h2>Pastas copiadas</h2>
+          <button
+            className="collapse-toggle"
+            aria-expanded={!foldersClosed}
+            onClick={() => toggleFolders(!foldersClosed)}
+            title={foldersClosed ? "Mostrar as pastas" : "Minimizar as pastas"}
+          >
+            <span className={`chevron ${foldersClosed ? "closed" : ""}`} aria-hidden="true">
+              ▾
+            </span>
+            <h2>Pastas copiadas</h2>
+            <span className="muted small">({profile.origens.length})</span>
+          </button>
           <button className="button" onClick={addSources}>
             Adicionar pastas
           </button>
         </div>
-        {profile.origens.length === 0 ? (
+        {foldersClosed ? null : profile.origens.length === 0 ? (
           <p className="empty">Nenhuma pasta ainda. Adicione as pastas que você quer copiar para o disco de backup.</p>
         ) : (
           <ul className="folders">
