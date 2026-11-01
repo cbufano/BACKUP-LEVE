@@ -1100,3 +1100,126 @@ textarea {
     opacity: 0.35;
   }
 }
+
+/* ---------- Settings and AI ---------- */
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gear {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.gear:hover:not(:disabled),
+.gear.active {
+  color: var(--petrol);
+  background: var(--petrol-soft);
+}
+
+.gear:hover:not(:disabled) svg {
+  transform: rotate(45deg);
+}
+
+.gear svg {
+  transition: transform 0.3s ease;
+}
+
+.gear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.settings {
+  display: grid;
+  gap: 18px;
+}
+
+.settings h1 {
+  margin: 0;
+}
+
+.provider-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.provider.active {
+  border-color: var(--petrol);
+  background: var(--petrol-soft);
+}
+
+.text-input {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.key-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.notice.ok {
+  background: var(--petrol-soft);
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  color: var(--ok);
+}
+
+.full-backup {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+
+.suggestions {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px dashed var(--petrol);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+}
+
+.suggestions .check {
+  margin: 0;
+}
+
+.suggestion-name {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-weight: 600;
+}

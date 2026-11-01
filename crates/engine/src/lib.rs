@@ -13,6 +13,8 @@ pub mod profile;
 pub mod report;
 pub mod resolve;
 pub mod scan;
+pub mod settings;
+pub mod survey;
 
 pub use error::{Error, Result};
 pub use exclude::Exclusions;

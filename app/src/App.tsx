@@ -5,13 +5,15 @@ import { ProfileView } from "./ProfileView";
 import { ReportsView } from "./ReportsView";
 import { ResultView } from "./ResultView";
 import { RunView } from "./RunView";
-import type { Profile, Progress, TargetResult } from "./types";
+import { SettingsView } from "./SettingsView";
+import type { Profile, Progress, Settings, TargetResult } from "./types";
 
 type Screen =
   | { kind: "perfil" }
   | { kind: "executando"; dryRun: boolean; startedAt: number }
   | { kind: "resultado"; dryRun: boolean; results: TargetResult[]; startedAt: number; finishedAt: number }
-  | { kind: "relatorios" };
+  | { kind: "relatorios" }
+  | { kind: "configuracoes" };
 
 export default function App() {
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
@@ -20,6 +22,11 @@ export default function App() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [connected, setConnected] = useState<Record<string, boolean>>({});
+  const [settings, setSettings] = useState<Settings | null>(null);
+
+  useEffect(() => {
+    api.getSettings().then(setSettings, () => setSettings(null));
+  }, []);
 
   useEffect(() => {
     api.listProfiles().then(setProfiles, (error) => {
@@ -77,7 +84,8 @@ export default function App() {
         destino: "",
         origens: [],
         modo: "sincronizar" as const,
-        pular_recriaveis: true,
+        pular_recriaveis: settings?.novo_perfil_pular_recriaveis ?? true,
+        pular_temporarios: settings?.novo_perfil_pular_temporarios ?? true,
         pular: [],
       }];
     setCurrent(next.length - 1);
@@ -114,13 +122,37 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="brand">
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            <rect x="6" y="8" width="8" height="4" rx="1" fill="currentColor" />
-            <circle cx="17" cy="15" r="1.3" fill="currentColor" />
-          </svg>
-          <span>Backup Leve</span>
+        <div className="brand-row">
+          <div className="brand">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+              <rect x="6" y="8" width="8" height="4" rx="1" fill="currentColor" />
+              <circle cx="17" cy="15" r="1.3" fill="currentColor" />
+            </svg>
+            <span>Backup Leve</span>
+          </div>
+          <button
+            className={`gear ${screen.kind === "configuracoes" ? "active" : ""}`}
+            title="Configurações"
+            aria-label="Configurações"
+            disabled={busy}
+            onClick={() => setScreen({ kind: "configuracoes" })}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
         </div>
         <nav aria-label="Perfis">
           <ul className="profile-list">
@@ -162,7 +194,11 @@ export default function App() {
           </div>
         )}
 
-        {profiles && profiles.length === 0 && (
+        {screen.kind === "configuracoes" && (
+          <SettingsView onBack={() => setScreen({ kind: "perfil" })} onSaved={setSettings} />
+        )}
+
+        {profiles && profiles.length === 0 && screen.kind !== "configuracoes" && (
           <div className="welcome">
             <h1>Nenhum perfil ainda</h1>
             <p className="lead">

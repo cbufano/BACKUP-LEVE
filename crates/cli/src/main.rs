@@ -49,6 +49,9 @@ enum Command {
         /// Copia também as pastas que um programa cria de novo (node_modules, target...).
         #[arg(long)]
         copiar_recriaveis: bool,
+        /// Copia também os arquivos temporários (*.tmp, ~$*...).
+        #[arg(long)]
+        copiar_temporarios: bool,
         /// Nome de arquivo ou pasta que fica de fora. Aceita `*.tmp`. Pode repetir.
         #[arg(long, value_name = "NOME")]
         pular: Vec<String>,
@@ -79,13 +82,14 @@ fn main() -> ExitCode {
         modo,
         simulacao,
         copiar_recriaveis,
+        copiar_temporarios,
         pular,
     } = Cli::parse().command;
     let options = Options {
         mode: modo.into(),
         dry_run: simulacao,
         cancel: None,
-        exclusions: Exclusions::new(!copiar_recriaveis, &pular),
+        exclusions: Exclusions::new(!copiar_recriaveis, &pular).with_temporary(!copiar_temporarios),
     };
 
     println!("Backup Leve {}", env!("CARGO_PKG_VERSION"));

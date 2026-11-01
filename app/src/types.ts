@@ -9,6 +9,8 @@ export interface Profile {
   modo: Mode;
   /** Leave out the folders that a tool creates again (node_modules, target...). */
   pular_recriaveis: boolean;
+  /** Leave out temporary files (*.tmp, ~$*...). */
+  pular_temporarios: boolean;
   /** Names of files and folders that stay out. `*.tmp` matches an ending. */
   pular: string[];
 }
@@ -125,4 +127,28 @@ export interface ReportEntry {
   label: string;
   path: string;
   stamp: string;
+}
+
+export type Provider = "nenhum" | "openai" | "grok" | "anthropic";
+
+export interface ProviderKey {
+  chave: string;
+  /** Empty: the default model of the service. */
+  modelo: string;
+}
+
+/** Program settings. See crates/engine/src/settings.rs. */
+export interface Settings {
+  provedor: Provider;
+  openai: ProviderKey;
+  grok: ProviderKey;
+  anthropic: ProviderKey;
+  novo_perfil_pular_recriaveis: boolean;
+  novo_perfil_pular_temporarios: boolean;
+}
+
+/** A name the AI suggests to skip. The user decides. */
+export interface Suggestion {
+  nome: string;
+  motivo: string;
 }

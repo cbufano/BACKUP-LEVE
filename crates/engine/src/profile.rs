@@ -30,6 +30,9 @@ pub struct Profile {
     /// On by default, also for profiles saved before this option existed.
     #[serde(rename = "pular_recriaveis", default = "on")]
     pub skip_rebuildable: bool,
+    /// Leave out temporary files (`*.tmp`, `~$*`...). On by default.
+    #[serde(rename = "pular_temporarios", default = "on")]
+    pub skip_temporary: bool,
     /// Names of files and folders that stay out. `*.tmp` matches an ending.
     #[serde(rename = "pular", default)]
     pub skip_names: Vec<String>,
@@ -55,7 +58,7 @@ struct ProfilesFile {
 impl Profile {
     /// What stays out of the backup of each source.
     pub fn exclusions(&self) -> Exclusions {
-        Exclusions::new(self.skip_rebuildable, &self.skip_names)
+        Exclusions::new(self.skip_rebuildable, &self.skip_names).with_temporary(self.skip_temporary)
     }
 
     /// Pairs of source and destination folders, in the order of `sources`.
@@ -165,6 +168,7 @@ mod tests {
             sources: sources.iter().map(PathBuf::from).collect(),
             mode: Mode::Sync,
             skip_rebuildable: true,
+            skip_temporary: true,
             skip_names: Vec::new(),
         }
     }
@@ -217,6 +221,7 @@ mod tests {
         let file: ProfilesFile = toml::from_str(text).unwrap();
         let old = &file.profiles[0];
         assert!(old.skip_rebuildable);
+        assert!(old.skip_temporary);
         assert!(old.skip_names.is_empty());
         assert!(!old.exclusions().is_empty());
     }

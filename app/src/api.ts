@@ -12,6 +12,8 @@ import type {
   Progress,
   RebuildableRule,
   ReportEntry,
+  Settings,
+  Suggestion,
   TargetResult,
 } from "./types";
 
@@ -52,6 +54,20 @@ export const api = {
 
   rebuildableRules: (): Promise<RebuildableRule[]> =>
     inTauri ? invoke("rebuildable_rules") : mock.rebuildableRules(),
+
+  temporaryNames: (): Promise<string[]> =>
+    inTauri ? invoke("temporary_names") : mock.temporaryNames(),
+
+  getSettings: (): Promise<Settings> => (inTauri ? invoke("get_settings") : mock.getSettings()),
+
+  saveSettings: (settings: Settings): Promise<void> =>
+    inTauri ? invoke("save_settings", { settings }) : mock.saveSettings(settings),
+
+  testAi: (settings: Settings): Promise<string> =>
+    inTauri ? invoke("test_ai", { settings }) : mock.testAi(settings),
+
+  suggestSkips: (profile: Profile): Promise<Suggestion[]> =>
+    inTauri ? invoke("suggest_skips", { profile }) : mock.suggestSkips(),
 
   folderExists: (path: string): Promise<boolean> =>
     inTauri ? invoke("folder_exists", { path }) : Promise.resolve(!path.startsWith("F:")),

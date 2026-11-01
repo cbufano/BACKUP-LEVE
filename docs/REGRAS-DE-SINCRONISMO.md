@@ -130,9 +130,41 @@ Nota: a pasta `vendor` não está na lista. Os plugins do WordPress guardam nela
 
 Nota: um ambiente `.venv` sem lista de pacotes fica no backup, mesmo com `CACHEDIR.TAG`. Sem a lista, ninguém sabe o que instalar de novo.
 
+### Arquivos temporários
+
+A opção "Pular os arquivos temporários" vem ligada em todo perfil.
+Um programa cria esses arquivos enquanto trabalha e não precisa deles depois.
+
+| Nome | O que é |
+|---|---|
+| `*.tmp`, `*.temp` | Arquivo temporário. |
+| `~$*` | Trava que o Word e o Excel deixam ao lado de um documento aberto. |
+| `*.crdownload` | Download do Chrome que não terminou. |
+| `*.swp`, `*.swo` | Cópia de trabalho do Vim. |
+| `*.pyc`, `*.pyo` | Código Python compilado. |
+| `.DS_Store` | Dados de pasta do macOS. |
+
+### Backup completo
+
+O botão "Backup completo (100%)" desliga as duas opções e apaga a lista de nomes do perfil.
+Assim o programa copia todos os arquivos. O botão "Voltar a pular" liga as duas opções de novo.
+
+### Sugestões da IA
+
+O botão "Sugerir com IA" pede a um serviço de IA nomes para pular. Veja o [ADR 0004](adr/0004-sugestoes-por-ia.md).
+
+1. O programa lê as origens e faz um resumo: as 60 pastas e as 60 terminações que ocupam mais espaço.
+2. O resumo tem só nomes, quantidades e tamanhos. O conteúdo dos arquivos não sai do computador.
+3. O que o perfil já pula não entra no resumo.
+4. A IA devolve nomes com o motivo. O programa descarta nome inválido e nome que o perfil já pula.
+5. O usuário marca os nomes que aceita. Só os nomes marcados entram na lista do perfil.
+
+Nota: a IA nunca decide sozinha. Uma sugestão sem a marca do usuário não muda o backup.
+
 ### Nomes escolhidos pelo usuário
 
-O perfil aceita outros nomes para pular, um por linha. Exemplos: `Downloads` e `*.tmp`.
+O perfil aceita outros nomes para pular, um por linha. Exemplos: `Downloads`, `*.log` e `Cópia de*`.
+`*.log` pula os nomes que terminam em `.log`. `Cópia de*` pula os nomes que começam com `Cópia de`.
 O nome vale para arquivos e pastas, em qualquer lugar da origem. A comparação não diferencia maiúsculas de minúsculas.
 Um nome com `/` ou `\` não vale.
 

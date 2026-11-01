@@ -56,7 +56,9 @@
 | `report` | Relatórios JSON e HTML. | feito |
 | `job` | Uma execução completa: junta os módulos acima. | feito |
 | `paths` | Caminhos relativos do índice e nomes reservados. | feito |
-| `exclude` | Regras do que fica de fora: pastas recriáveis e nomes do usuário. Sem I/O. | feito |
+| `exclude` | Regras do que fica de fora: pastas recriáveis, arquivos temporários e nomes do usuário. Sem I/O. | feito |
+| `survey` | Resumo de uma origem (nomes e tamanhos) para as sugestões da IA. | feito |
+| `settings` | Configurações do programa em `%APPDATA%\backup-leve\configuracoes.toml`: serviço de IA, chave e opções de perfil novo. | feito |
 | `resolve` | Execução das escolhas do usuário na tela de conflitos. | feito |
 | `profile` | Leitura e gravação de `perfis.toml`. | feito |
 

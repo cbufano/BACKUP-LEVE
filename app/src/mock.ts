@@ -8,6 +8,8 @@ import type {
   RebuildableRule,
   Report,
   ReportEntry,
+  Settings,
+  Suggestion,
   TargetResult,
 } from "./types";
 
@@ -18,6 +20,7 @@ let profiles: Profile[] = [
     origens: ["D:\\Documentos", "D:\\Projetos\\Clientes"],
     modo: "sincronizar",
     pular_recriaveis: true,
+    pular_temporarios: true,
     pular: ["*.tmp"],
   },
   {
@@ -26,6 +29,7 @@ let profiles: Profile[] = [
     origens: ["D:\\Fotos"],
     modo: "somente-novos",
     pular_recriaveis: true,
+    pular_temporarios: true,
     pular: [],
   },
 ];
@@ -44,6 +48,45 @@ export async function rebuildableRules(): Promise<RebuildableRule[]> {
     { pasta: "target", precisa: [["cargo.toml"]], quem_recria: "cargo (Rust)" },
     { pasta: "build", precisa: [["build.gradle", "build.gradle.kts"]], quem_recria: "Gradle (Android)" },
     { pasta: "bin", precisa: [["*.csproj", "*.vbproj", "*.fsproj"]], quem_recria: "Visual Studio (.NET)" },
+  ];
+}
+
+export async function temporaryNames(): Promise<string[]> {
+  return ["*.tmp", "*.temp", "~$*", "*.crdownload", "*.swp", "*.swo", "*.pyc", "*.pyo", ".ds_store"];
+}
+
+let settings: Settings = {
+  provedor: "nenhum",
+  openai: { chave: "", modelo: "" },
+  grok: { chave: "", modelo: "" },
+  anthropic: { chave: "", modelo: "" },
+  novo_perfil_pular_recriaveis: true,
+  novo_perfil_pular_temporarios: true,
+};
+
+export async function getSettings(): Promise<Settings> {
+  return structuredClone(settings);
+}
+
+export async function saveSettings(next: Settings): Promise<void> {
+  settings = structuredClone(next);
+}
+
+export async function testAi(next: Settings): Promise<string> {
+  await new Promise((done) => setTimeout(done, 600));
+  if (next.provedor === "nenhum" || !next[next.provedor].chave.trim()) {
+    throw "escolha um serviço de IA e escreva a chave";
+  }
+  return "OK";
+}
+
+export async function suggestSkips(): Promise<Suggestion[]> {
+  await new Promise((done) => setTimeout(done, 1200));
+  if (settings.provedor === "nenhum") throw "configure um serviço de IA na engrenagem, no alto da tela";
+  return [
+    { nome: "Library", motivo: "Cache do Unity. O editor cria a pasta de novo ao abrir o projeto." },
+    { nome: "*.pdb", motivo: "Símbolos de depuração gerados pelo compilador." },
+    { nome: ".cache", motivo: "Cache de ferramentas. É criado de novo quando a ferramenta roda." },
   ];
 }
 

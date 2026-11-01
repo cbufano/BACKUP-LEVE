@@ -23,6 +23,9 @@ pub enum Error {
     #[error("perfis: {0}")]
     Profile(String),
 
+    #[error("configurações: {0}")]
+    Settings(String),
+
     #[error("erro de disco: {0}")]
     Io(#[from] std::io::Error),
 

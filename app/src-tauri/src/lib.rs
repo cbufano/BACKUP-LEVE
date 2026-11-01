@@ -1,15 +1,18 @@
 //! Commands the window calls. All decisions about files stay in `backup-leve-engine`.
 
+mod ai;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use backup_leve_engine::exclude::{Rule, REBUILDABLE};
+use backup_leve_engine::exclude::{Rule, REBUILDABLE, TEMPORARY};
 use backup_leve_engine::paths::{REPORTS_DIR, STATE_DIR};
 use backup_leve_engine::profile::{self, folder_label, Profile};
 use backup_leve_engine::resolve::{self, Decision, Outcome};
+use backup_leve_engine::settings::{self, Settings};
 use backup_leve_engine::{run as run_job, Event, Options, Report, Side};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -346,6 +349,57 @@ fn rebuildable_rules() -> &'static [Rule] {
     REBUILDABLE
 }
 
+/// The names that "pular_temporarios" leaves out, for the profile screen.
+#[tauri::command]
+fn temporary_names() -> &'static [&'static str] {
+    TEMPORARY
+}
+
+fn settings_path() -> Result<PathBuf, String> {
+    settings::default_path()
+        .ok_or_else(|| "a pasta de configuração do usuário não foi encontrada".into())
+}
+
+#[tauri::command]
+fn get_settings() -> Result<Settings, String> {
+    settings::load(&settings_path()?).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn save_settings(settings: Settings) -> Result<(), String> {
+    settings::save(&settings_path()?, &settings).map_err(|err| err.to_string())
+}
+
+/// Sends a short question with the settings on screen (saved or not).
+#[tauri::command]
+async fn test_ai(settings: Settings) -> Result<String, String> {
+    let (provider, key, model) = settings
+        .active()
+        .ok_or("escolha um serviço de IA e escreva a chave")?;
+    ai::test(provider, &key, &model).await
+}
+
+/// Asks the AI for names to skip in the profile's sources. The user decides.
+#[tauri::command]
+async fn suggest_skips(profile: Profile) -> Result<Vec<ai::Suggestion>, String> {
+    let settings = settings::load(&settings_path()?).map_err(|err| err.to_string())?;
+    let (provider, key, model) = settings
+        .active()
+        .ok_or("configure um serviço de IA na engrenagem, no alto da tela")?;
+    if profile.sources.is_empty() {
+        return Err("adicione pelo menos uma pasta de origem".into());
+    }
+    ai::suggest(
+        provider,
+        key,
+        model,
+        profile.sources.clone(),
+        profile.exclusions(),
+        profile.skip_names.clone(),
+    )
+    .await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -363,6 +417,11 @@ pub fn run() {
             open_folder,
             folder_exists,
             rebuildable_rules,
+            temporary_names,
+            get_settings,
+            save_settings,
+            test_ai,
+            suggest_skips,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

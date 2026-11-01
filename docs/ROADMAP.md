@@ -30,6 +30,10 @@ O programa compilado tem 2,6 MB.
 - [x] Tela de conflitos com as quatro opções
 - [x] Pastas que um programa cria de novo (`node_modules`, `target`, `.venv`...) ficam de fora, e o usuário pode pular outros nomes
 - [x] Tela de relatórios anteriores
+- [x] Arquivos temporários (`*.tmp`, `~$*`...) ficam de fora, com opção para desligar
+- [x] Botão "Backup completo (100%)"
+- [x] Engrenagem de configurações: serviço de IA (Anthropic, OpenAI, Grok), chave e modelo
+- [x] Sugestões da IA de nomes para pular ([ADR 0004](adr/0004-sugestoes-por-ia.md))
 - [ ] Teste do dono na janela real
 - [ ] Ícone próprio (hoje é o ícone padrão do Tauri)
 

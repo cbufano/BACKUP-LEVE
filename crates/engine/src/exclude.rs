@@ -98,11 +98,32 @@ pub const REBUILDABLE: &[Rule] = &[
     rule("pods", &[COCOAPODS], "CocoaPods (iOS)"),
 ];
 
-/// A name the user chose: exact, or `*.ext` for an ending. Compared without case.
+/// Temporary files: a program creates them while it works and does not need them later.
+/// `~$*` is the lock file that Word and Excel leave next to an open document.
+pub const TEMPORARY: &[&str] = &[
+    "*.tmp",
+    "*.temp",
+    "~$*",
+    "*.crdownload",
+    "*.swp",
+    "*.swo",
+    "*.pyc",
+    "*.pyo",
+    ".ds_store",
+];
+
+/// Whether `text` is a valid name to skip: not empty, no path separator, not only `*`.
+pub fn is_valid_name(text: &str) -> bool {
+    Pattern::parse(text).is_some()
+}
+
+/// A name the user chose: exact, `*.ext` for an ending or `~$*` for a start.
+/// Compared without case.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Pattern {
     Exact(String),
     Ending(String),
+    Start(String),
 }
 
 impl Pattern {
@@ -110,6 +131,11 @@ impl Pattern {
         let text = text.trim().to_lowercase();
         if text.is_empty() || text.contains('/') || text.contains('\\') {
             return None;
+        }
+        if let Some(start) = text.strip_suffix('*') {
+            if !start.is_empty() && !start.contains('*') {
+                return Some(Self::Start(start.to_owned()));
+            }
         }
         match text.strip_prefix('*') {
             Some("") => None,
@@ -122,6 +148,7 @@ impl Pattern {
         match self {
             Self::Exact(exact) => name == exact,
             Self::Ending(ending) => name.len() > ending.len() && name.ends_with(ending.as_str()),
+            Self::Start(start) => name.len() > start.len() && name.starts_with(start.as_str()),
         }
     }
 }
@@ -130,6 +157,8 @@ impl Pattern {
 pub struct Exclusions {
     /// Leave out the [`REBUILDABLE`] folders and the folders with a [`CACHE_TAG`].
     pub rebuildable: bool,
+    /// Leave out the [`TEMPORARY`] files.
+    pub temporary: bool,
     names: Vec<Pattern>,
 }
 
@@ -138,6 +167,7 @@ impl Exclusions {
     pub const fn none() -> Self {
         Self {
             rebuildable: false,
+            temporary: false,
             names: Vec::new(),
         }
     }
@@ -146,6 +176,7 @@ impl Exclusions {
     pub fn new(rebuildable: bool, names: &[String]) -> Self {
         Self {
             rebuildable,
+            temporary: false,
             names: names
                 .iter()
                 .filter_map(|name| Pattern::parse(name))
@@ -153,11 +184,22 @@ impl Exclusions {
         }
     }
 
+    /// Also leave out the [`TEMPORARY`] files when `on`.
+    pub fn with_temporary(mut self, on: bool) -> Self {
+        if on && !self.temporary {
+            self.temporary = true;
+            self.names
+                .extend(TEMPORARY.iter().filter_map(|name| Pattern::parse(name)));
+        }
+        self
+    }
+
     pub fn is_empty(&self) -> bool {
         !self.rebuildable && self.names.is_empty()
     }
 
-    /// Whether a file or folder named `name` (in lowercase) is one of the user's names.
+    /// Whether a file or folder named `name` (in lowercase) is one of the user's names
+    /// or a temporary file.
     pub fn skips_name(&self, name: &str) -> bool {
         self.names.iter().any(|pattern| pattern.matches(name))
     }
@@ -293,6 +335,29 @@ mod tests {
         assert!(rules.skips_name("rascunho.tmp"));
         assert!(!rules.skips_name(".tmp"));
         assert!(!rules.skips_name("downloads antigos"));
+    }
+
+    #[test]
+    fn temporary_files_stay_out_only_when_the_option_is_on() {
+        let off = Exclusions::new(false, &[]);
+        assert!(!off.skips_name("rascunho.tmp"));
+        let on = Exclusions::new(false, &[]).with_temporary(true);
+        assert!(!on.is_empty());
+        assert!(on.skips_name("rascunho.tmp"));
+        assert!(on.skips_name("~$relatorio.docx"));
+        assert!(on.skips_name(".ds_store"));
+        assert!(!on.skips_name("relatorio.docx"));
+        assert!(!on.skips_name("~$"));
+    }
+
+    #[test]
+    fn a_name_can_match_a_start() {
+        let rules = Exclusions::new(false, &["Copia de*".into()]);
+        assert!(rules.skips_name("copia de notas.txt"));
+        assert!(!rules.skips_name("notas.txt"));
+        assert!(is_valid_name("~$*"));
+        assert!(!is_valid_name("*"));
+        assert!(!is_valid_name("a/b"));
     }
 
     #[test]
